@@ -319,7 +319,7 @@ local currentMap = {
 
     if self.complete then
       print("congrats!", 44, 58, 10)
-      print("press enter for menu", 18, 68, 5)
+      print("o/x for menu", 36, 68, 5)
     end
   end
 }
@@ -351,7 +351,7 @@ local player = {
   coyoteWall = 0,
   lastWallDir = 0,
   jumpSfxType = 0,
-  -- scale physics so jump height = ~40px, full held jump = 2 beats
+  -- scale physics so jump height = ~40px, full held jump = 1 beat
   sync_to_beat = function(self, spd)
     local fpb = spd * 1.875  -- frames per beat
     local dur = fpb           -- full jump = 1 beat
@@ -360,6 +360,11 @@ local player = {
     self.SETTINGS.gravity = max(1, flr(8 * h / (dur * dur)))
     self.SETTINGS.down_force = self.SETTINGS.jump_force
     self.SETTINGS.max_speed_y = self.SETTINGS.jump_force
+    -- timing windows scaled to beat
+    self.SETTINGS.jump_buffer = max(2, flr(fpb / 4))     -- 1/4 beat input buffer
+    self.SETTINGS.jump_cooldown = max(4, flr(fpb / 2))   -- 1/2 beat before can re-jump
+    self.SETTINGS.coyote_wall = max(2, flr(fpb / 8))     -- 1/8 beat wall grace
+    self.SETTINGS.wall_lock = max(2, flr(fpb / 6))       -- 1/6 beat wall jump lock
   end,
   moveLeft = function(self)
     if (self.timeSinceWallJump > 0) then
@@ -375,7 +380,7 @@ local player = {
   end,
   -- sfx_type: 0=normal, 1=flourish
   jump = function(self, sfx_type)
-    self.jumpTriggered = 10
+    self.jumpTriggered = self.SETTINGS.jump_buffer
     self.jumpSfxType = sfx_type or 0
   end,
   release_jump = function(self)
@@ -423,7 +428,7 @@ local player = {
     end
 
     if is_hugging_left_wall or is_hugging_right_wall then
-      self.coyoteWall = 4
+      self.coyoteWall = self.SETTINGS.coyote_wall
       self.lastWallDir = is_hugging_left_wall and -1 or 1
     elseif self.coyoteWall > 0 then
       self.coyoteWall -= 1
@@ -442,7 +447,7 @@ local player = {
       local is_air_jump = not self.canJump
       self.accY = self.SETTINGS.jump_force
       self.canJump = false
-      self.timeSinceJump = 20
+      self.timeSinceJump = self.SETTINGS.jump_cooldown
 
       if is_air_jump then
         self.airJumps += 1
@@ -452,11 +457,11 @@ local player = {
 
         if wall_left then
           self.accX = self.SETTINGS.jump_force
-          self.timeSinceWallJump = 5
+          self.timeSinceWallJump = self.SETTINGS.wall_lock
         end
         if wall_right then
           self.accX = -self.SETTINGS.jump_force
-          self.timeSinceWallJump = 5
+          self.timeSinceWallJump = self.SETTINGS.wall_lock
         end
         self.coyoteWall = 0
       end

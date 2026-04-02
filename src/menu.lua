@@ -16,14 +16,14 @@ menu_state = {
     if btnp(3) then self.sel = min(2, self.sel + 1) end
 
     if self.sel == 0 then
-      if btnp(0) then self.sel_beat = max(0, self.sel_beat - 1) end
-      if btnp(1) then self.sel_beat = min(14, self.sel_beat + 1) end
+      if btnp(0) then self.sel_beat = (self.sel_beat - 1) % 15 end
+      if btnp(1) then self.sel_beat = (self.sel_beat + 1) % 15 end
     elseif self.sel == 1 then
       if btnp(0) then self.sel_speed = min(30, self.sel_speed + 2) end
       if btnp(1) then self.sel_speed = max(10, self.sel_speed - 2) end
     elseif self.sel == 2 then
-      if btnp(0) then self.sel_map = max(1, self.sel_map - 1) end
-      if btnp(1) then self.sel_map = min(#maps, self.sel_map + 1) end
+      if btnp(0) then self.sel_map = (self.sel_map - 2) % #maps + 1 end
+      if btnp(1) then self.sel_map = self.sel_map % #maps + 1 end
     end
 
     -- rebuild preview on change
@@ -154,8 +154,14 @@ countdown_state = {
 
 play_state = {
   update = function(self)
-    check_controls()
-    player:update()
+    if currentMap.complete then
+      if btnp(4) or btnp(5) then
+        go_to_menu()
+      end
+    else
+      check_controls()
+      player:update()
+    end
     currentMap:update()
     beat:update()
   end,
