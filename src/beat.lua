@@ -49,8 +49,30 @@ music_configs = {
 }
 
 SCALES = {
-  major = { 0, 2, 4, 5, 7, 9, 11, 12 }
+  { name="major",      notes={ 0, 2, 4, 5, 7, 9, 11, 12 } },
+  { name="minor",      notes={ 0, 2, 3, 5, 7, 8, 10, 12 } },
+  { name="phrygian",   notes={ 0, 1, 3, 5, 7, 8, 10, 12 } },
+  { name="pentatonic", notes={ 0, 2, 4, 7, 9, 12, 14, 16 } },
+  { name="blues",      notes={ 0, 3, 5, 6, 7, 10, 12, 15 } },
+  { name="diminished", notes={ 0, 2, 3, 5, 6, 8, 9, 11 } },
+  { name="whole tone", notes={ 0, 2, 4, 6, 8, 10, 12, 14 } },
 }
+current_scale = SCALES[1].notes
+octave_offset = 0
+
+-- play a scale run on SFX slot 5, channel 2
+-- scale: notes table, oct: octave offset, spd: speed, count: how many notes
+function play_scale_run(scale, oct, spd, count)
+  local si = 5
+  local n = count or #scale
+  memset(saddr(si), 0, 68)
+  for i = 1, n do
+    local val = nval(24 + scale[((i-1) % #scale) + 1] + oct, 1, 4)
+    poke(saddr(si) + (i - 1) * 2, val % 256, flr(val / 256))
+  end
+  poke(saddr(si) + 64, 0, spd or 8, n, 0)
+  sfx(si, 2)
+end
 
 beat = {
   speed = 18,

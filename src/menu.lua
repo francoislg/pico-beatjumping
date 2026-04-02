@@ -1,8 +1,10 @@
 menu_state = {
-  sel = 0,        -- 0=beat, 1=speed, 2=map
+  sel = 0,        -- 0=beat, 1=speed, 2=map, 3=scale, 4=octave
   sel_beat = 0,
   sel_speed = 18,
   sel_map = 1,
+  sel_scale = 1,
+  sel_octave = 0, -- -1, 0, +1
   prev_beat = -1,
   prev_speed = -1,
 
@@ -13,7 +15,7 @@ menu_state = {
 
   update = function(self)
     if btnp(2) then self.sel = max(0, self.sel - 1) end
-    if btnp(3) then self.sel = min(2, self.sel + 1) end
+    if btnp(3) then self.sel = min(4, self.sel + 1) end
 
     if self.sel == 0 then
       if btnp(0) then self.sel_beat = (self.sel_beat - 1) % 15 end
@@ -24,6 +26,17 @@ menu_state = {
     elseif self.sel == 2 then
       if btnp(0) then self.sel_map = (self.sel_map - 2) % #maps + 1 end
       if btnp(1) then self.sel_map = self.sel_map % #maps + 1 end
+    elseif self.sel == 3 then
+      if btnp(0) then self.sel_scale = (self.sel_scale - 2) % #SCALES + 1 end
+      if btnp(1) then self.sel_scale = self.sel_scale % #SCALES + 1 end
+    elseif self.sel == 4 then
+      if btnp(0) then self.sel_octave = max(-1, self.sel_octave - 1) end
+      if btnp(1) then self.sel_octave = min(1, self.sel_octave + 1) end
+    end
+
+    -- preview scale/octave on change
+    if (self.sel == 3 or self.sel == 4) and (btnp(0) or btnp(1)) then
+      play_scale_run(SCALES[self.sel_scale].notes, self.sel_octave * 12, 8, 8)
     end
 
     -- rebuild preview on change
@@ -39,6 +52,8 @@ menu_state = {
 
     -- start game
     if btnp(4) or btnp(5) then
+      current_scale = SCALES[self.sel_scale].notes
+      octave_offset = self.sel_octave * 12
       countdown_state:start(self.sel_beat, self.sel_speed, self.sel_map)
     end
   end,
@@ -51,13 +66,16 @@ menu_state = {
     print("beat jumping", 28, 10, 7)
     line(10, 20, 118, 20, 1)
 
+    local oct_label = self.sel_octave == 0 and "normal" or (self.sel_octave > 0 and "+"..self.sel_octave or tostr(self.sel_octave))
     local labels = {
       "beat: "..cfg.name,
       "tempo: ~"..bpm.." bpm",
       "map: "..maps[self.sel_map].name,
+      "scale: "..SCALES[self.sel_scale].name,
+      "octave: "..oct_label,
     }
-    for i = 0, 2 do
-      local y = 30 + i * 12
+    for i = 0, 4 do
+      local y = 26 + i * 10
       local c = (i == self.sel) and 7 or 5
       local pre = (i == self.sel) and "> " or "  "
       print(pre..labels[i + 1], 8, y, c)
@@ -67,8 +85,8 @@ menu_state = {
       end
     end
 
-    if t() % 1 > 0.5 then
-      print("o/x to start", 34, 70, 10)
+    if beat.march == 0 then
+      print("o/x to start", 34, 86, 10)
     end
 
     fillp(0x5A5A)

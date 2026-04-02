@@ -200,7 +200,7 @@ local currentMap = {
   play_coin = function(self, y)
     local si = 5
     memset(saddr(si), 0, 68)
-    local p = 36 + SCALES.major[mid(1, (8 - ceil(y / 16)) + 1, 8)]
+    local p = 36 + current_scale[mid(1, (8 - ceil(y / 16)) + 1, 8)] + octave_offset
     local n1 = nval(p, 5, 5)
     local n2 = nval(p + 7, 5, 4, 5)
     poke(saddr(si), n1 % 256, flr(n1 / 256))
@@ -217,6 +217,7 @@ local currentMap = {
         self:spawn_wave()
       else
         self.complete = true
+        play_scale_run(current_scale, octave_offset, 6, 8)
       end
     end
   end,
@@ -515,21 +516,21 @@ local player = {
   end,
   -- get scale degree, wrapping into next octave
   scale_at = function(self, n)
-    if (n <= 8) return SCALES.major[n]
-    return SCALES.major[n - 7] + 12
+    if (n <= 8) return current_scale[n]
+    return current_scale[n - 7] + 12
   end,
   jump_sfx = function(self)
-    jump_note:play_at_pitch(SCALES.major[self.lastNote], 2)
+    jump_note:play_at_pitch(current_scale[self.lastNote] + octave_offset, 2)
   end,
   -- btn 4: short pluck (triangle, single note)
   pluck_sfx = function(self)
-    local p = 24 + SCALES.major[self.lastNote]
+    local p = 24 + current_scale[self.lastNote] + octave_offset
     self:play_note(3, p, 1, 5, 5, 4, 2)
   end,
   -- btn 5: arpeggio chord from scale (square wave)
   flourish_sfx = function(self)
     local n = self.lastNote
-    local base = 24
+    local base = 24 + octave_offset
     local pitches = {
       base + self:scale_at(n),
       base + self:scale_at(n + 2),
@@ -539,7 +540,7 @@ local player = {
     self:play_chord(4, pitches, 3, 5, 2, 3)
   end,
   spike_sfx = function(self, note)
-    spike_note:play_at_pitch(flr(SCALES.major[note] / 2), 2)
+    spike_note:play_at_pitch(flr(current_scale[note] / 2) + octave_offset, 2)
   end,
   draw = function(self)
     pset(self.x, self.y, 3)
