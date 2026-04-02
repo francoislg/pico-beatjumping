@@ -2,74 +2,14 @@ pico-8 cartridge // http://www.pico-8.com
 version 43
 __lua__
 local debug_mode = 0
-local game_state = 0  -- 0=menu, 1=play
-local menu_sel = 0    -- 0=beat, 1=speed
-local sel_beat = 0
-local sel_speed = 18
-local prev_beat, prev_speed = -1, -1
 local music_pattern = 0
+local current_state = nil
 
 function saddr(i) return 0x3200+i*68 end
 function nval(p,w,v,e) return p+(w%8)*64+v*512+(e or 0)*4096 end
 
-local sounds = {
-  -- kicks: tonal instrument + drop = percussive
-  boom  = { pitch=12, wave=0, vol=6, eff=3 },  -- sine kick, deep
-  thud  = { pitch=12, wave=1, vol=6, eff=3 },  -- triangle kick, warm
-  punch = { pitch=12, wave=3, vol=4, eff=3 },  -- long-sq kick, hollow
-  knock = { pitch=12, wave=3, vol=6, eff=3 },  -- long-sq kick, loud
-  -- hats: noise(6) only ヌ█⬆️ other instruments sound like beeps
-  tick  = { pitch=48, wave=6, vol=2, eff=5 },  -- closed hat (noise+fade)
-  shh   = { pitch=48, wave=6, vol=2, eff=5, filters={buzz=true} },  -- brown noise hat
-  soft  = { pitch=48, wave=6, vol=2, eff=5, filters={dampen=2} },  -- dampened hat, rim-like
-  -- snares: noise at mid pitch
-  snap  = { pitch=24, wave=6, vol=5, eff=5 },  -- tight snare
-  crack = { pitch=30, wave=6, vol=4, eff=3 },  -- snare with drop
-}
-
--- pattern: note positions (0-indexed). each beat = 4 notes.
--- e.g. note 0=beat1, 2=beat1-&, 4=beat2, 6=beat2-&, etc.
-local music_configs = {
-  [0]  = { name="straight",    kick="boom",  hat="tick",  beats=4, notes=16,
-           pattern={kick={0,8},       hat={4,12}} },
-  [1]  = { name="driving",     kick="boom",  hat="tick",  beats=4, notes=16,
-           pattern={kick={0,8},       hat={0,4,8,12}} },
-  [2]  = { name="halftime",    kick="boom",  hat="soft",  beats=4, notes=16,
-           pattern={kick={0},         hat={4,8,12}} },
-  [3]  = { name="offbeat",     kick="boom",  hat="tick",  beats=4, notes=16,
-           pattern={kick={0,8},       hat={2,6,10,14}} },
-  [4]  = { name="bossa nova",  kick="boom",  hat="tick",  beats=4, notes=16,
-           pattern={kick={0,6,10},    hat={2,4,8,12,14}} },
-  [5]  = { name="shuffle",     kick="thud",  hat="soft",  beats=4, notes=16,
-           pattern={kick={0,8},       hat={3,7,11,15}} },
-  [6]  = { name="syncopated",  kick="knock", hat="tick",  beats=4, notes=16,
-           pattern={kick={0,10},      hat={4,14}} },
-  [7]  = { name="reggae",      kick="thud",  hat="soft",  beats=4, notes=16,
-           pattern={kick={8},         hat={2,6,10,14}} },
-  [8]  = { name="waltz",       kick="thud",  hat="tick",  beats=3, notes=12,
-           pattern={kick={0},         hat={4,8}} },
-  [9]  = { name="waltz swing", kick="boom",  hat="soft",  beats=3, notes=12,
-           pattern={kick={0,6},       hat={4,8,10}} },
-  [10] = { name="6/8",         kick="boom",  hat="soft",  beats=2, notes=12,
-           pattern={kick={0,6},       hat={2,4,8,10}} },
-  [11] = { name="5/4",         kick="thud",  hat="tick",  beats=5, notes=20,
-           pattern={kick={0,12},      hat={4,8,16}} },
-  [12] = { name="7/8",         kick="boom",  hat="soft",  beats=3, notes=14,
-           pattern={kick={0,4,8},     hat={2,6,10,12}} },
-  [13] = { name="7/4",         kick="knock", hat="tick",  beats=7, notes=28,
-           pattern={kick={0,16},      hat={4,8,12,20,24}} },
-  [14] = { name="9/8",         kick="thud",  hat="soft",  beats=4, notes=18,
-           pattern={kick={0,4,8,12},  hat={2,6,10,14,16}} },
-}
-
-local map1 = {
-  lines = { "15:127,15:80", "120:127,120:80", "15:80,80:80", "120:100,80:100", "15:32,50:32", "8:16,35:16" },
-  notes = { "100:90", "30:70", "70:40", "110:20" }
-}
-
-local SCALES = {
-  major = { 0, 2, 4, 5, 7, 9, 11, 12 }
-}
+#include src/maps.lua
+#include src/beat.lua
 
 -- Inspired by: https://www.lexaloffle.com/bbs/?tid=42124
 function make_sfx_note(sfx_i)
@@ -184,6 +124,8 @@ local beat = {
 local currentMap = {
   lines = {},
   notes = {},
+  waves = {},
+  currentWave = 1,
   cumulatedNotes = 0,
   generalTimer = 0,
   init = function(self, selectedMap)
@@ -191,6 +133,7 @@ local currentMap = {
     self.notes = {}
     self.cumulatedNotes = 0
     self.generalTimer = 0
+    self.complete = false
     for I = 1, #selectedMap.lines do
       local lineSplit = split(selectedMap.lines[I], ",")
       local lineStart = split(lineSplit[1], ":", true)
@@ -198,8 +141,20 @@ local currentMap = {
       self.lines[I] = { lineStart[1], lineStart[2], lineEnd[1], lineEnd[2] }
     end
 
-    for I = 1, #selectedMap.notes do
-      local pos = split(selectedMap.notes[I], ":", true)
+    self.waves = selectedMap.waves or {{}}
+    self.currentWave = 1
+    self.totalNotes = 0
+    for w in all(self.waves) do
+      self.totalNotes += #w
+    end
+    self:spawn_wave()
+  end,
+  spawn_wave = function(self)
+    self.notes = {}
+    local wave = self.waves[self.currentWave]
+    if (not wave) return
+    for I = 1, #wave do
+      local pos = split(wave[I], ":", true)
       self.notes[I] = { pos[1], pos[2] }
     end
   end,
@@ -256,6 +211,14 @@ local currentMap = {
   score_note = function(self, y)
     self.cumulatedNotes += 1
     self:play_coin(y)
+    if #self.notes == 0 then
+      if self.currentWave < #self.waves then
+        self.currentWave += 1
+        self:spawn_wave()
+      else
+        self.complete = true
+      end
+    end
   end,
 
   get_collision_x = function(self, x, y, speedX)
@@ -352,7 +315,12 @@ local currentMap = {
     rect(0, 0, 127, 127, beat.march == 0 and 0xC1 or 0x1C)
     fillp()
 
-    print(tostr(self.cumulatedNotes), 120, 5)
+    print(tostr(self.cumulatedNotes).."/"..tostr(self.totalNotes), 108, 5)
+
+    if self.complete then
+      print("congrats!", 44, 58, 10)
+      print("press enter for menu", 18, 68, 5)
+    end
   end
 }
 
@@ -577,85 +545,11 @@ local player = {
   end
 }
 
-function menu_update()
-  if btnp(2) then menu_sel = max(0, menu_sel - 1) end
-  if btnp(3) then menu_sel = min(1, menu_sel + 1) end
-
-  if menu_sel == 0 then
-    if btnp(0) then sel_beat = max(0, sel_beat - 1) end
-    if btnp(1) then sel_beat = min(14, sel_beat + 1) end
-  else
-    if btnp(0) then sel_speed = min(30, sel_speed + 2) end
-    if btnp(1) then sel_speed = max(10, sel_speed - 2) end
-  end
-
-  -- rebuild preview on change
-  if sel_beat ~= prev_beat or sel_speed ~= prev_speed then
-    beat.speed = sel_speed
-    music(-1)
-    beat:init(music_configs[sel_beat])
-    prev_beat = sel_beat
-    prev_speed = sel_speed
-  end
-
-  beat:update()
-
-  -- start game
-  if btnp(4) or btnp(5) then
-    game_state = 1
-    music(-1)
-    music_pattern = 0
-    beat.speed = sel_speed
-    player:sync_to_beat(sel_speed)
-    currentMap:init(map1)
-    beat:init(music_configs[sel_beat])
-  end
-end
-
-function menu_draw()
-  cls()
-  local cfg = music_configs[sel_beat]
-  local bpm = flr(7200 / (cfg.notes / cfg.beats * sel_speed))
-
-  print("beat jumping", 28, 10, 7)
-  line(10, 20, 118, 20, 1)
-
-  for i = 0, 1 do
-    local y = 30 + i * 12
-    local c = (i == menu_sel) and 7 or 5
-    local pre = (i == menu_sel) and "> " or "  "
-    if i == 0 then
-      print(pre.."beat: "..cfg.name, 8, y, c)
-    else
-      print(pre.."tempo: ~"..bpm.." bpm", 8, y, c)
-    end
-    if i == menu_sel then
-      print("<", 2, y, 6)
-      print(">", 122, y, 6)
-    end
-  end
-
-  if t() % 1 > 0.5 then
-    print("o/x to start", 34, 70, 10)
-  end
-
-  -- beat preview flash on border
-  fillp(0x5A5A)
-  rect(0, 0, 127, 127, beat.march == 0 and 0xC1 or 0x1C)
-  fillp()
-end
-
-function go_to_menu()
-  game_state = 0
-  music(-1)
-  prev_beat = -1
-  prev_speed = -1
-end
+#include src/menu.lua
 
 function _init()
   menuitem(1, "back to menu", go_to_menu)
-  beat.speed = sel_speed
-  beat:init(music_configs[sel_beat])
+  go_to_menu()
 end
 
 function clamp(val, min, max)
@@ -724,14 +618,7 @@ function check_controls()
 end
 
 function _update60()
-  if game_state == 0 then
-    menu_update()
-  else
-    check_controls()
-    player:update()
-    currentMap:update()
-    beat:update()
-  end
+  current_state:update()
 end
 
 function debug_collisions()
@@ -741,23 +628,7 @@ function debug_collisions()
 end
 
 function _draw()
-  if game_state == 0 then
-    menu_draw()
-    return
-  end
-  cls()
-  currentMap:draw()
-  player:draw()
-
-  if (debug_mode == 1) then
-    debug_collisions()
-  end
-  if (debug_mode == 2) then
-    currentMap:debug(1)
-  end
-  if (debug_mode == 3) then
-    player:debug()
-  end
+  current_state:draw()
 end
 
 __gfx__
