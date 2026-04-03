@@ -5,12 +5,13 @@ menu_state = {
   sel_map = 1,
   sel_scale = 1,
   sel_octave = 0, -- -1, 0, +1
-  prev_beat = -1,
+  prev_beat  = -1,
   prev_speed = -1,
 
   enter = function(self)
     self.prev_beat = -1
     self.prev_speed = -1
+    self.clip_err = false
   end,
 
   update = function(self)
@@ -50,6 +51,18 @@ menu_state = {
 
     beat:update()
 
+    -- paste replay from clipboard (ctrl+v)
+    local clip = stat(4)
+    if clip and #clip >= 6 and clip ~= last_export then
+      local s, ev = import_clipboard()
+      printh("", "@clip")
+      if s then
+        start_replay(s, ev)
+      else
+        self.clip_err = true
+      end
+    end
+
     -- start game
     if btnp(4) or btnp(5) then
       current_scale = SCALES[self.sel_scale].notes
@@ -87,7 +100,10 @@ menu_state = {
 
     if beat.march == 0 then
       print("o/x to start", 34, 86, 10)
+      print(self.clip_err and "invalid replay? try again" or "ctrl+v to paste replay", self.clip_err and 10 or 16, 96, 8)
     end
+
+    print("v"..REPLAY_VERSION, 2, 122, 1)
 
     fillp(0x5A5A)
     rect(0, 0, 127, 127, beat.march == 0 and 0xC1 or 0x1C)
@@ -103,11 +119,12 @@ countdown_state = {
   start_y = 0,
 
   start = function(self, sel_beat, sel_speed, sel_map)
+    rec_reset()
     self.beat_count = 0
     self.last_note = -1
     local map_data = maps[sel_map].data
-    self.start_x = map_data.start.x
-    self.start_y = map_data.start.y
+    self.start_x = map_data.start[1]
+    self.start_y = map_data.start[2]
     music(-1)
     music_pattern = 0
     beat.speed = sel_speed
@@ -132,6 +149,9 @@ countdown_state = {
           player.y = self.start_y
           player.accX = 0
           player.accY = 0
+          play_state.end_sel = 0
+          play_state.copied = false
+          play_state.end_ready = false
           current_state = play_state
         end
         self.beat_count += 1
@@ -171,12 +191,43 @@ countdown_state = {
 }
 
 play_state = {
+  end_sel = 0,   -- 0=copy replay, 1=menu (or 0=menu in replay)
+  copied = false,
+  end_ready = false,
+
   update = function(self)
+    if is_replay then replay_advance() end
     if currentMap.complete then
-      if btnp(4) or btnp(5) then
-        go_to_menu()
+      gpio_update()
+      -- skip first frame so held buttons don't fire
+      if not self.end_ready then
+        self.end_ready = true
+      elseif is_replay then
+        if real_btnp(4) or real_btnp(5) then
+          stop_replay()
+          self.end_ready = false
+          go_to_menu()
+        end
+      else
+        if btnp(2) then self.end_sel = max(0, self.end_sel - 1) end
+        if btnp(3) then self.end_sel = min(1, self.end_sel + 1) end
+        if btnp(4) or btnp(5) then
+          if self.end_sel == 0 and not self.copied then
+            local bytes = encode_replay()
+            export_clipboard(bytes)
+            gpio_start(bytes)
+            self.copied = true
+            self.end_sel = 1
+          else
+            self.end_sel = 0
+            self.copied = false
+            self.end_ready = false
+            go_to_menu()
+          end
+        end
       end
     else
+      if (not is_replay) rec_update()
       check_controls()
       player:update()
     end
@@ -188,6 +239,9 @@ play_state = {
     cls()
     currentMap:draw()
     player:draw()
+    currentMap:draw_complete()
+
+    if (is_replay and beat.march == 1) print("rep", 4, 5, 8)
 
     if (debug_mode == 1) debug_collisions()
     if (debug_mode == 2) currentMap:debug(1)

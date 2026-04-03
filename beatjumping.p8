@@ -124,7 +124,7 @@ local beat = {
 local currentMap = {
   lines = {},
   notes = {},
-  waves = {},
+  rawWaves = {},
   currentWave = 1,
   cumulatedNotes = 0,
   generalTimer = 0,
@@ -134,28 +134,28 @@ local currentMap = {
     self.cumulatedNotes = 0
     self.generalTimer = 0
     self.complete = false
-    for I = 1, #selectedMap.lines do
-      local lineSplit = split(selectedMap.lines[I], ",")
+    for l in all(split(selectedMap.lines, ";")) do
+      local lineSplit = split(l, ",")
       local lineStart = split(lineSplit[1], ":", true)
       local lineEnd = split(lineSplit[2], ":", true)
-      self.lines[I] = { lineStart[1], lineStart[2], lineEnd[1], lineEnd[2] }
+      add(self.lines, { lineStart[1], lineStart[2], lineEnd[1], lineEnd[2] })
     end
 
-    self.waves = selectedMap.waves or {{}}
+    self.rawWaves = split(selectedMap.waves, "|")
     self.currentWave = 1
     self.totalNotes = 0
-    for w in all(self.waves) do
-      self.totalNotes += #w
+    for ws in all(self.rawWaves) do
+      self.totalNotes += #split(ws, ",")
     end
     self:spawn_wave()
   end,
   spawn_wave = function(self)
     self.notes = {}
-    local wave = self.waves[self.currentWave]
-    if (not wave) return
-    for I = 1, #wave do
-      local pos = split(wave[I], ":", true)
-      self.notes[I] = { pos[1], pos[2] }
+    local ws = self.rawWaves[self.currentWave]
+    if (not ws) return
+    for n in all(split(ws, ",")) do
+      local pos = split(n, ":", true)
+      add(self.notes, { pos[1], pos[2] })
     end
   end,
   update = function(self)
@@ -212,7 +212,7 @@ local currentMap = {
     self.cumulatedNotes += 1
     self:play_coin(y)
     if #self.notes == 0 then
-      if self.currentWave < #self.waves then
+      if self.currentWave < #self.rawWaves then
         self.currentWave += 1
         self:spawn_wave()
       else
@@ -316,11 +316,27 @@ local currentMap = {
     rect(0, 0, 127, 127, beat.march == 0 and 0xC1 or 0x1C)
     fillp()
 
-    print(tostr(self.cumulatedNotes).."/"..tostr(self.totalNotes), 108, 5)
-
-    if self.complete then
-      print("congrats!", 44, 58, 10)
-      print("o/x for menu", 36, 68, 5)
+    local sc = tostr(self.cumulatedNotes).."/"..tostr(self.totalNotes)
+    print(sc, 124 - #sc * 4, 5)
+  end,
+  draw_complete = function(self)
+    if not self.complete then return end
+    local py = is_replay and 70 or 80
+    fillp(0x5A5A)
+    rectfill(16, 44, 111, py, 0)
+    fillp()
+    rect(16, 44, 111, py, 5)
+    print("congrats!", 44, 48, 10)
+    if is_replay then
+      print("> back to menu", 24, 60, 7)
+    else
+      local copy_label = play_state.copied and "copied!" or "copy replay"
+      local c0 = play_state.end_sel == 0 and 7 or 5
+      local c1 = play_state.end_sel == 1 and 7 or 5
+      local p0 = play_state.end_sel == 0 and "> " or "  "
+      local p1 = play_state.end_sel == 1 and "> " or "  "
+      print(p0..copy_label, 24, 60, c0)
+      print(p1.."back to menu", 24, 70, c1)
     end
   end
 }
@@ -552,10 +568,23 @@ local player = {
 }
 
 #include src/menu.lua
+#include src/recording.lua
 
 function _init()
   menuitem(1, "back to menu", go_to_menu)
-  go_to_menu()
+  if peek(0x5f80) == 0xfe then
+    local n = peek(0x5f81)
+    local bytes = {}
+    for i = 1, n do add(bytes, peek(0x5f81 + i)) end
+    local s, ev = decode_replay(bytes)
+    if s then
+      start_replay(s, ev)
+    else
+      go_to_menu()
+    end
+  else
+    go_to_menu()
+  end
 end
 
 function clamp(val, min, max)
